@@ -14,7 +14,7 @@ fi
 RPMROOT=`rpmbuild --eval '%_topdir' xCAT-cisco.spec`
 if [ $? -gt 0 ]
 then
-	echo "Could not determine rpmbuild's root path'
+	echo "Could not determine rpmbuild's root path"
 	exit 1
 fi
 echo "RPM is building in ${RPMROOT}"
