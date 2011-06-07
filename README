@@ -1,4 +1,23 @@
-xCAT-cisco is used to add cisco UCS and other components to the
-xCAT build.  
+xCAT-cisco is a plugin for xCAT to allow xCAT commands to run 
+easily on Cisco UCS hardware.  
+
+xCAT is 'Extreme Cloud Administration Toolkit' and is used to deploy
+physical and virtual machines with proven scalability.
+
+For more information on xCAT see: http://xcat.sf.net
+
+To build this and install it on your xCAT server you can simply follow
+the links and copy opt/xcat/lib/perl/xCAT_plugin/ucs.pm to the xCAT
+server in /opt/xcat/lib/perl/xCAT_plugin and then restart xCAT:
+service xcatd restart
+
+Or
+
+You can download this git repository to a RedHat or CentOS Linux 
+machine and do:
+
+./build-xCAT-cisco-RPM
+cd /usr/src/redhat/RPMS/noarch/
+rpm -ivh xCAT-cisco*rpm
 
 vallard@benincosa.com
