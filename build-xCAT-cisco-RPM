@@ -1,0 +1,16 @@
+#!/bin/sh
+# build the RPM from the source
+
+OSNAME=$(uname)
+VER=`cat Version`
+
+rpmbuild --version > /dev/null
+if [ $? -gt 0 ]
+then
+	echo "Error: rpmbuild doesn't seem to work..."
+	exit 1
+fi
+
+tar --exclude .git -czf $RPMROOT/SOURCES/xCAT-cisco-$VER.tar.gz ./
+rm -f $RPMROOT/SRPMS/xCAT-cisco-$VER*rpm $RPMROOT/RPMS/noarch/xCAT-cisco-$VER*rpm
+rpmbuild -ta $RPMROOT/SOURCES/xCAT-cisco-$VER.tar.gz
