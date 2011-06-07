@@ -11,6 +11,14 @@ then
 	exit 1
 fi
 
+RPMROOT=`rpmbuild --eval '%_topdir' xCAT-cisco.spec`
+if [ $? -gt 0 ]
+then
+	echo "Could not determine rpmbuild's root path'
+	exit 1
+fi
+echo "RPM is building in ${RPMROOT}"
+
 tar --exclude .git -czf $RPMROOT/SOURCES/xCAT-cisco-$VER.tar.gz ./
 rm -f $RPMROOT/SRPMS/xCAT-cisco-$VER*rpm $RPMROOT/RPMS/noarch/xCAT-cisco-$VER*rpm
 rpmbuild -ta $RPMROOT/SOURCES/xCAT-cisco-$VER.tar.gz
