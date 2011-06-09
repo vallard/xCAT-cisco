@@ -8,20 +8,21 @@ BEGIN
 {
   $::XCATROOT = $ENV{'XCATROOT'} ? $ENV{'XCATROOT'} : '/opt/xcat';
 }
+
+#perl Libraries
 use strict;
 use LWP;
 use XML::Simple;
 use IO::Socket;
 use Data::Dumper;
-#use POSIX "WNOHANG";
+use Getopt::Long;
+$XML::Simple::PREFERRED_PARSER='XML::Parser';
+
+#xCAT libraries
 use lib "$::XCATROOT/lib/perl";
 use xCAT::Table;
 use xCAT::Utils;
-use xCAT_monitoring::monitorctrl;
-######use XML::LibXML;
-$XML::Simple::PREFERRED_PARSER='XML::Parser';
 use xCAT::DBobjUtils;
-use Getopt::Long;
 use xCAT::SvrUtils;
 
 =head1 NAME 
@@ -62,6 +63,8 @@ TODO: Test this with service nodes!
 =cut
 
 sub preprocess_request {
+    	Getopt::Long::Configure("bundling");
+    	Getopt::Long::Configure("no_pass_through");
 	my $req = shift;
 	# ignore this function for now and just return
 	return [$req];
@@ -76,6 +79,9 @@ here and we process them based on what command was asked for.
 =cut
 
 sub process_request {
+	# pass the getops to this function
+    	Getopt::Long::Configure("bundling");
+    	Getopt::Long::Configure("no_pass_through");
 	my $request = shift;
 	my $callback = shift;
 	my $command = $request->{command}->[0];
@@ -236,6 +242,102 @@ commands to the UCSM.
 sub power {
 	my $request = shift;
 	my $callback = shift;
+	# get additional arguments
+    	if ($request->{arg}) {
+        	@ARGV = @{$request->{arg}};
+    	} else {
+        	@ARGV = ();
+    	}
+	
+	my $help;
+
+	my $usage = sub {
+		$callback->({data => 
+			[
+			"Usage: ",
+			"   rpower " . $request->{noderange}->[0] . " on|off|stat|reset|boot"
+			]
+		});
+		return;
+	};
+
+	GetOptions(
+		'h|?|help' => \$help,
+	);
+
+
+	if($help){ $usage->($callback); return }
+
+	my $subcmd = shift( @ARGV);
+	unless($subcmd){
+		$callback->({error => ["No power action specified"],errorcode=>1});
+		$usage->();
+		return;
+	}
+
+	unless($subcmd =~ /on|off|stat|reset|boot/){
+		$callback->({error => ["Invalid power action: $subcmd"],errorcode=>1});
+		$usage->();
+		return;
+	}
+
+	if($subcmd =~ /stat/){
+		powerStat($request, $callback);
+	}elsif($subcmd =~ /on|off|stat|reset|boot/){
+		powerOp($request, $callback, $subcmd);
+	}else{
+		$callback->({error=> ["unsupported power action: $subcmd"],errorcode =>1});
+	}
+}
+
+
+=item powerOp
+
+Funtion to change power stat
+
+=cut
+
+sub powerOp {
+	my $request = shift;
+	my $callback = shift;
+	my $op = shift; # should be on|off|stat|reset|boot
+	my $nh = buildNodeHash($request, $callback);
+	unless($nh){
+		return;
+	}
+	foreach my $ucsm (keys %$nh){
+		my $cookie = logon($ucsm, $nh->{$ucsm}->{username}, $nh->{$ucsm}->{password},$callback);
+		#print Dumper($cookie);
+		unless($cookie){
+			next;
+		}
+		my $xml = '<configConfMo cookie="'.$cookie.'">'."\n";
+		$xml .= "<inConfig>\n";
+		#print Dumper($nh->{$ucsm}->{nodes});
+		foreach my $node (keys %{$nh->{$ucsm}->{nodes}}){
+			my $ch = $nh->{$ucsm}->{nodes}->{$node}->{chassis};
+			my $s = $nh->{$ucsm}->{nodes}->{$node}->{slot};
+			$xml .= '<lsPower dn="org-root/powersys/chassis-'.$ch.'/blade-'.$s.'"/>'."\n";
+		}
+		$xml .= "</inConfig>\n";
+		$xml .= "</configConfMo>\n";
+		my ($lContent, $lMessage, $lSuccess) = doPostXML("http://$ucsm/nuova", $xml);
+		print Dumper($lContent);
+		
+	}	
+}
+
+
+=item powerStat
+
+Function for querying power status of a UCS node.
+
+=cut
+
+
+sub powerStat {
+	my $request = shift;
+	my $callback = shift;
 	my $nh = buildNodeHash($request, $callback);
 	unless($nh){
 		return;
@@ -256,9 +358,6 @@ sub power {
 			my $s = $nh->{$ucsm}->{nodes}->{$node}->{slot};
 			$xml .= '<dn value="sys/chassis-'.$ch.'/blade-'.$s.'"/>'."\n";
 		}
-		#$xml .= '<dn value="sys/chassis-1/blade-1"/>'."\n";
-		#$xml .= '<dn value="sys/chassis-1/blade-2"/>'."\n";
-		#$xml .= '<dn value="sys/chassis-1/blade-3"/>'."\n";
 		$xml .= "</inDns>\n";
 		$xml .= "</configResolveDns>\n";
 		my ($lContent, $lMessage, $lSuccess) = doPostXML("http://$ucsm/nuova", $xml);
