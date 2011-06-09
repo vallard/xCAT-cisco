@@ -8,18 +8,18 @@ BEGIN
 {
   $::XCATROOT = $ENV{'XCATROOT'} ? $ENV{'XCATROOT'} : '/opt/xcat';
 }
-use lib "$::XCATROOT/lib/perl";
-use xCAT::Table;
-use xCAT::Utils;
-use IO::Socket;
-use xCAT_monitoring::monitorctrl;
 use strict;
 use LWP;
 use XML::Simple;
-use XML::LibXML;
-$XML::Simple::PREFERRED_PARSER='XML::Parser';
+use IO::Socket;
 use Data::Dumper;
-use POSIX "WNOHANG";
+#use POSIX "WNOHANG";
+use lib "$::XCATROOT/lib/perl";
+use xCAT::Table;
+use xCAT::Utils;
+use xCAT_monitoring::monitorctrl;
+######use XML::LibXML;
+$XML::Simple::PREFERRED_PARSER='XML::Parser';
 use xCAT::DBobjUtils;
 use Getopt::Long;
 use xCAT::SvrUtils;
@@ -133,11 +133,14 @@ sub logon {
 	eval {
 		my $lParser = XML::Simple->new();
 		my $lConfig = $lParser->XMLin($response->content);
-		print Dumper($lConfig);
+		#print Dumper($lConfig);
 		$lCookie = $lConfig->{'outCookie'};
 		
 		$lCookie = undef if ($lCookie && $lCookie eq "");
-		print Dumper($lCookie);
+		unless($lCookie){
+			$callback->({error=>["$ucsm: ". $lConfig->{errorDescr}],errorcode=>$lConfig->{errorCode}});
+		}
+		#print Dumper($lCookie);
 	};
 	if($@){
 		$callback->({error=>["Login failure trying to evaluate cookie"],errorcode=>1});
@@ -207,6 +210,7 @@ sub logout
     my $lCookie = undef;
     my ($lContent, $lMessage, $lSuccess) = doPostXML($aInUri, $lXmlRequest,1);
 
+
     if ($lSuccess)
     {
         eval {
@@ -239,14 +243,72 @@ sub power {
 	foreach my $ucsm (keys %$nh){
 		my $cookie = logon($ucsm, $nh->{$ucsm}->{username}, $nh->{$ucsm}->{password},$callback);
 		#print Dumper($cookie);
-		
 		unless($cookie){
 			next;
 		}
-		logout($ucsm,$cookie);
+
+		# now here is where we actually do something!
+		my $xml = '<configResolveDns cookie="'.$cookie.'" inHierarchical="false">'."\n";
+		$xml .= "<inDns>\n";
+		#print Dumper($nh->{$ucsm}->{nodes});
+		foreach my $node (keys %{$nh->{$ucsm}->{nodes}}){
+			my $ch = $nh->{$ucsm}->{nodes}->{$node}->{chassis};
+			my $s = $nh->{$ucsm}->{nodes}->{$node}->{slot};
+			$xml .= '<dn value="sys/chassis-'.$ch.'/blade-'.$s.'"/>'."\n";
+		}
+		#$xml .= '<dn value="sys/chassis-1/blade-1"/>'."\n";
+		#$xml .= '<dn value="sys/chassis-1/blade-2"/>'."\n";
+		#$xml .= '<dn value="sys/chassis-1/blade-3"/>'."\n";
+		$xml .= "</inDns>\n";
+		$xml .= "</configResolveDns>\n";
+		my ($lContent, $lMessage, $lSuccess) = doPostXML("http://$ucsm/nuova", $xml);
+		#print Dumper($lContent);
+		if($lSuccess){
+				my $cmap = $nh->{$ucsm}->{cmap};
+				
+        eval {
+            my $lParser = XML::Simple->new();
+						# have to add the dn to the XML parser to get the blades right. 
+            my $lConfig = $lParser->XMLin($lContent, KeyAttr => 'dn');
+						my $bladeOut =  $lConfig->{outConfigs}->{computeBlade};
+
+						# this may be a list of blades
+						unless($bladeOut->{chassisId}){
+							foreach my $dn (keys %$bladeOut){
+								my $chassis = ($bladeOut->{$dn}->{chassisId});
+								my $slot = ($bladeOut->{$dn}->{slotId});
+								my $operPower = $bladeOut->{$dn}->{operPower};
+								my $nn =  $cmap->{$chassis}->{$slot};
+								printPower($chassis,$slot,$operPower,$nn,$callback);
+								#print "$nn ($chassis/$slot): $operPower\n";
+							}
+						}else{
+							# handle the case of a single node.
+							my $chassis = $bladeOut->{chassisId};
+							my $slot = $bladeOut->{slotId};
+							my $operPower = $bladeOut->{operPower};
+							my $nn =  $cmap->{$chassis}->{$slot};
+							printPower($chassis,$slot,$operPower,$nn,$callback);
+						}
+        };
+				if($@){
+					print Dumper($@);
+				}
+		}
+		logout("http://$ucsm/nuova",$cookie);
 	}
 }
-   
+  
+
+sub printPower {
+	my $c = shift;
+	my $s = shift;
+	my $p = shift;
+	my $nn = shift;
+	my $callback = shift;
+	$callback->({node => [ {name => [$nn], data => [{descr => ["($c/$s)"], contents =>[$p]}] } ]});
+}
+ 
 =item buildNodeHash
 
 buildNodeHash takes the noderange and builds a hash
@@ -257,6 +319,10 @@ ucsm =>{
 	username
 
 	password
+
+	cmap
+		chassis
+			slot => nodename
 
 	node
 
@@ -329,8 +395,19 @@ sub buildNodeHash {
 		unless($nh->{$currUCSM}){
 			$nh->{$currUCSM}->{nodes} = ();
 		}
-		push @{$nh->{$currUCSM}->{nodes}},{$node=>{chassis => $chassis,slot => $slot}}
+		unless($nh->{$currUCSM}->{cmap}){
+			$nh->{$currUCSM}->{cmap} = {};
+		}
+		# map node to chassis/slot
+		$nh->{$currUCSM}->{nodes}->{$node} = {chassis => $chassis,slot => $slot};
+
+		# the reverse: map chassis/slot to node
+		$nh->{$currUCSM}->{cmap}->{$chassis}->{$slot} = $node;
 	}
+
+
+	# The rest of this is just username and password stuff
+
 
 	# first get the default user/password 
 	my $passh = $db{'passwd'}->getAttribs({key=>'ucs'},'username','password');
