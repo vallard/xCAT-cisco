@@ -7,6 +7,10 @@ with proven scalability.  In addition to provisioning methods it provides
 methods to manipulate and query hardware, including getting information from 
 management interfaces (like IPMI, other vendor blades, etc).
 
+Think of it this way:  Every hardware vendor sells/packages some sort of management 
+solution to manage their hardware:  IBM - Director, HP - Insight, 
+Dell - something else, ... etc.  xCAT is a way to manage all hardware.
+
 For more information on xCAT see: http://xcat.sf.net
 
 Installation instructions:

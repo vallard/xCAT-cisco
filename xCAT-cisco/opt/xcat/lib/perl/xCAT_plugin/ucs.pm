@@ -311,6 +311,10 @@ sub powerOp {
 		unless($cookie){
 			next;
 		}
+
+		# first we have to get all the info on this noderange.
+
+
 		my $xml = '<configConfMo cookie="'.$cookie.'">'."\n";
 		$xml .= "<inConfig>\n";
 		#print Dumper($nh->{$ucsm}->{nodes});
@@ -342,17 +346,40 @@ sub powerStat {
 	unless($nh){
 		return;
 	}
+	$nh = getBladeInfoFromUCS($nh, $callback);
+	unless($nh){ return };
+
+	foreach my $ucsm (keys %$nh){
+
+		foreach my $nn (keys %{$nh->{$ucsm}->{nodes}} ){
+			my $c = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{chassisId};
+			my $s = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{slotId};
+			my $p = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{operPower};
+			print Dumper($nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo});	
+			printPower($c, $s, $p, $nn, $callback);
+		}
+	}
+}
+  
+
+=item getBladeInfoFromUCS
+
+Add the blade information from UCS into the hash.
+
+=cut
+
+sub getBladeInfoFromUCS {
+	my $nh = shift;
+	my $callback = shift;
+
 	foreach my $ucsm (keys %$nh){
 		my $cookie = logon($ucsm, $nh->{$ucsm}->{username}, $nh->{$ucsm}->{password},$callback);
-		#print Dumper($cookie);
 		unless($cookie){
 			next;
 		}
-
-		# now here is where we actually do something!
+		#	 now here is where we actually do something!
 		my $xml = '<configResolveDns cookie="'.$cookie.'" inHierarchical="false">'."\n";
 		$xml .= "<inDns>\n";
-		#print Dumper($nh->{$ucsm}->{nodes});
 		foreach my $node (keys %{$nh->{$ucsm}->{nodes}}){
 			my $ch = $nh->{$ucsm}->{nodes}->{$node}->{chassis};
 			my $s = $nh->{$ucsm}->{nodes}->{$node}->{slot};
@@ -361,43 +388,40 @@ sub powerStat {
 		$xml .= "</inDns>\n";
 		$xml .= "</configResolveDns>\n";
 		my ($lContent, $lMessage, $lSuccess) = doPostXML("http://$ucsm/nuova", $xml);
-		#print Dumper($lContent);
-		if($lSuccess){
-				my $cmap = $nh->{$ucsm}->{cmap};
-				
-        eval {
-            my $lParser = XML::Simple->new();
-						# have to add the dn to the XML parser to get the blades right. 
-            my $lConfig = $lParser->XMLin($lContent, KeyAttr => 'dn');
-						my $bladeOut =  $lConfig->{outConfigs}->{computeBlade};
-
-						# this may be a list of blades
-						unless($bladeOut->{chassisId}){
-							foreach my $dn (keys %$bladeOut){
-								my $chassis = ($bladeOut->{$dn}->{chassisId});
-								my $slot = ($bladeOut->{$dn}->{slotId});
-								my $operPower = $bladeOut->{$dn}->{operPower};
-								my $nn =  $cmap->{$chassis}->{$slot};
-								printPower($chassis,$slot,$operPower,$nn,$callback);
-								#print "$nn ($chassis/$slot): $operPower\n";
-							}
-						}else{
-							# handle the case of a single node.
-							my $chassis = $bladeOut->{chassisId};
-							my $slot = $bladeOut->{slotId};
-							my $operPower = $bladeOut->{operPower};
-							my $nn =  $cmap->{$chassis}->{$slot};
-							printPower($chassis,$slot,$operPower,$nn,$callback);
-						}
-        };
-				if($@){
-					print Dumper($@);
-				}
-		}
 		logout("http://$ucsm/nuova",$cookie);
+		if($lSuccess){
+			my $cmap = $nh->{$ucsm}->{cmap};
+       eval {
+       	my $lParser = XML::Simple->new();
+				# have to add the dn to the XML parser to get the blades right. 
+				my $lConfig = $lParser->XMLin($lContent, KeyAttr => 'dn');
+				my $bladeOut =  $lConfig->{outConfigs}->{computeBlade};
+				# this may be a list of blades
+				unless($bladeOut->{chassisId}){
+					foreach my $dn (keys %$bladeOut){
+						my $chassis = ($bladeOut->{$dn}->{chassisId});
+						my $slot = ($bladeOut->{$dn}->{slotId});
+						my $nn =  $cmap->{$chassis}->{$slot};
+						$nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo} = $bladeOut->{$dn};
+					}
+				}else{
+					# handle the case of a single node.
+					my $chassis = $bladeOut->{chassisId};
+					my $slot = $bladeOut->{slotId};
+					my $nn =  $cmap->{$chassis}->{$slot};
+					$nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo} = $bladeOut;
+				}
+			};
+		}else{
+			print Dumper($@);
+			return 0;
+		}
 	}
+	return $nh;
 }
-  
+
+
+
 
 sub printPower {
 	my $c = shift;
@@ -405,7 +429,7 @@ sub printPower {
 	my $p = shift;
 	my $nn = shift;
 	my $callback = shift;
-	$callback->({node => [ {name => [$nn], data => [{descr => ["($c/$s)"], contents =>[$p]}] } ]});
+	$callback->({node => [ {name => [$nn], data => [{desc => ["($c/$s)"], contents =>[$p]}] } ]});
 }
  
 =item buildNodeHash
