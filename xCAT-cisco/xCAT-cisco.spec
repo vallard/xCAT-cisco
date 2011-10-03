@@ -46,5 +46,5 @@ rm -rf $RPM_BUILD_ROOT
 if [ -f "/proc/cmdline" ]
 then
 	echo "Restarting xCAT for plugins to take effect..."
-	/etc/init.d/xcat reload
+	/etc/init.d/xcatd reload
 fi

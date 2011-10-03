@@ -281,67 +281,20 @@ sub power {
 		return;
 	}
 
-	if($subcmd =~ /stat/){
-		powerStat($request, $callback);
-	}elsif($subcmd =~ /on|off|stat|reset|boot/){
-		powerOp($request, $callback, $subcmd);
-	}else{
-		$callback->({error=> ["unsupported power action: $subcmd"],errorcode =>1});
-	}
+	powerOp($request, $callback,$subcmd);
 }
-
 
 =item powerOp
 
-Funtion to change power stat
+Function for running power operations
 
 =cut
+
 
 sub powerOp {
 	my $request = shift;
 	my $callback = shift;
-	my $op = shift; # should be on|off|stat|reset|boot
-	my $nh = buildNodeHash($request, $callback);
-	unless($nh){
-		return;
-	}
-	foreach my $ucsm (keys %$nh){
-		my $cookie = logon($ucsm, $nh->{$ucsm}->{username}, $nh->{$ucsm}->{password},$callback);
-		#print Dumper($cookie);
-		unless($cookie){
-			next;
-		}
-
-		# first we have to get all the info on this noderange.
-
-
-		my $xml = '<configConfMo cookie="'.$cookie.'">'."\n";
-		$xml .= "<inConfig>\n";
-		#print Dumper($nh->{$ucsm}->{nodes});
-		foreach my $node (keys %{$nh->{$ucsm}->{nodes}}){
-			my $ch = $nh->{$ucsm}->{nodes}->{$node}->{chassis};
-			my $s = $nh->{$ucsm}->{nodes}->{$node}->{slot};
-			$xml .= '<lsPower dn="org-root/powersys/chassis-'.$ch.'/blade-'.$s.'"/>'."\n";
-		}
-		$xml .= "</inConfig>\n";
-		$xml .= "</configConfMo>\n";
-		my ($lContent, $lMessage, $lSuccess) = doPostXML("http://$ucsm/nuova", $xml);
-		print Dumper($lContent);
-		
-	}	
-}
-
-
-=item powerStat
-
-Function for querying power status of a UCS node.
-
-=cut
-
-
-sub powerStat {
-	my $request = shift;
-	my $callback = shift;
+	my $op = shift;
 	my $nh = buildNodeHash($request, $callback);
 	unless($nh){
 		return;
@@ -349,15 +302,66 @@ sub powerStat {
 	$nh = getBladeInfoFromUCS($nh, $callback);
 	unless($nh){ return };
 
-	foreach my $ucsm (keys %$nh){
-
-		foreach my $nn (keys %{$nh->{$ucsm}->{nodes}} ){
-			my $c = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{chassisId};
-			my $s = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{slotId};
-			my $p = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{operPower};
-			print Dumper($nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo});	
-			printPower($c, $s, $p, $nn, $callback);
+	if($op =~ /stat/){
+		foreach my $ucsm (keys %$nh){
+			foreach my $nn (keys %{$nh->{$ucsm}->{nodes}} ){
+				my $c = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{chassisId};
+				my $s = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{slotId};
+				my $p = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{operPower};
+				print Dumper($nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo});	
+				printPower($c, $s, $p, $nn, $callback);
+			}
 		}
+		return;
+	}
+
+	# translate:
+	if($op =~ /off/){
+		$op = "down";
+	}
+	# this is a power on/off request?
+	# go through each UCSM:
+	foreach my $ucsm (keys %$nh){
+		my @dns;
+		# get the name of the nodes?
+		foreach my $nn (keys %{$nh->{$ucsm}->{nodes}}){
+		
+			my $ddn =  $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{assignedToDn};
+			unless($ddn){
+				$callback->({error=>["$nn does not have a service profile associated with it"],errorcode=>1});
+				
+			}else{
+				push @dns, $ddn;
+			}
+			
+		}
+
+	#<configConfMos cookie="<cookie>" inHierarchical="true">
+  #<inConfigs>
+  #  <pair key="sys/chassis-1/blade-1">      <computeBlade adminPower="hard-reset-immediate" descr=""  dn="sys/chassis-1/blade-1" lc="discovered" name="" usrLbl="">      </computeBlade>    </pair>          </inConfigs></configConfMos>	
+#
+
+		my $cookie = logon($ucsm, $nh->{$ucsm}->{username}, $nh->{$ucsm}->{password},$callback);
+		unless($cookie){ next }
+	
+		my $xml = '<configConfMos cookie="'.$cookie.'" >'."\n";
+		$xml .= '<inConfigs>'."\n";
+		#foreach my $org (@dns){
+			#$xml .= '<pair key="' . $org . '/power">'."\n";
+			#$xml .= '<lsPower dn="' . $org. '/power" state="'.$op. '"/>'."\n";
+			#$xml .= '</pair>'."\n";
+			#$xml .= '<pair key="sys/chassis-1/blade-1/power">'."\n";
+			#$xml .= '<lsPower dn="sys/chassis-1/blade-1/power" state="'.$op. '"/>'."\n";
+			#$xml .= '</pair>'."\n";
+		#}
+		$xml .= '</inConfigs>'."\n";	
+		$xml .= '</configConfMos>'."\n";	
+		print Dumper($xml);
+		my ($lContent, $lMessage, $lSuccess) = doPostXML("http://$ucsm/nuova", $xml);
+		print Dumper($lContent);
+		
+			
+		
 	}
 }
   
@@ -375,7 +379,8 @@ sub getBladeInfoFromUCS {
 	foreach my $ucsm (keys %$nh){
 		my $cookie = logon($ucsm, $nh->{$ucsm}->{username}, $nh->{$ucsm}->{password},$callback);
 		unless($cookie){
-			next;
+			# don't let anyone continue unless we're authenticated
+			return 0;	
 		}
 		#	 now here is where we actually do something!
 		my $xml = '<configResolveDns cookie="'.$cookie.'" inHierarchical="false">'."\n";
