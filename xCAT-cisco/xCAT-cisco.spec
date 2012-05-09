@@ -45,6 +45,8 @@ rm -rf $RPM_BUILD_ROOT
 %post
 if [ -f "/proc/cmdline" ]
 then
+	cd /opt/xcat/bin/
+	ln -sf xcatclient lssp
 	echo "Restarting xCAT for plugins to take effect..."
 	/etc/init.d/xcatd reload
 fi
