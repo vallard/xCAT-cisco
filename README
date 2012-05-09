@@ -22,7 +22,7 @@ For information on how to install xCAT see:
 http://sumavi.com/sections/local-installation
 
 
-Building instructions:
+Building Instructions
 
 If you want to build this source you can use git commands to download this
 tree and extract it on your home directory.
@@ -40,6 +40,27 @@ machine and do:
 ./build-xCAT-cisco-RPM
 cd /usr/src/redhat/RPMS/noarch/
 rpm -ivh xCAT-cisco*rpm
+
+Configuration Instructions
+
+* Make a group called ucsnodes
+nodech <nodes> groups,=ucsnodes
+
+* Set the nodes management interface
+nodech ucsnodes nodehm.mgt=ucs
+
+* Add the UCSM to the nodelist
+nodeadd <my ucsm virtual ip address> groups=ucsm
+
+* Add UCS to the mpa tab
+tabedit mpa
+Add the following line:
+ucsm,<userid>,<password>
+
+In my case:
+ucsm,admin,cisco.123
+
+* Add UCS blades to mp table
 
 If you have questions please send them my way:
 vallard@benincosa.com

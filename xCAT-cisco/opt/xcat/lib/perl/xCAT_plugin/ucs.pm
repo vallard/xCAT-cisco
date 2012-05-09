@@ -2,6 +2,7 @@
 # vallard@benincosa.com
 # vallard@cisco.com
 # © 2011 Cisco Systems, Inc. All rights reserved.
+# nsavin@griddynamics.com
 
 package xCAT_plugin::ucs;
 BEGIN
@@ -16,6 +17,7 @@ use XML::Simple;
 use IO::Socket;
 use Data::Dumper;
 use Getopt::Long;
+use Carp;
 $XML::Simple::PREFERRED_PARSER='XML::Parser';
 
 #xCAT libraries
@@ -24,6 +26,17 @@ use xCAT::Table;
 use xCAT::Utils;
 use xCAT::DBobjUtils;
 use xCAT::SvrUtils;
+
+
+my %powermap = (
+    on      =>  'up',
+    off     =>  'down',
+    softoff => 'soft-shut-down',
+    cycle   => 'cycle-immediate',
+    'reset' => 'hard-reset-immediate',
+    boot    => 'cycle-immediate',
+);
+
 
 =head1 NAME 
 
@@ -44,6 +57,10 @@ put it in the /opt/xcat/lib/perl/xCAT_plugin directory
 
 Vallard Benincosa - L<http://benincosa.com>
 
+Savin Nikita <nsavin@griddynamics.com>
+
+=cut
+
 =head1 FUNCTIONS
 
 =cut
@@ -52,6 +69,9 @@ Vallard Benincosa - L<http://benincosa.com>
 sub handled_commands {
   return {
     rpower => 'nodehm:power,mgt',
+    getmacs => 'nodehm:getmac,mgt',
+		lsflexnode => 'ucs'    ,
+		lssp => 'ucs'    
   };
 }
 
@@ -85,187 +105,117 @@ sub process_request {
 	my $request = shift;
 	my $callback = shift;
 	my $command = $request->{command}->[0];
+    if ($request->{arg}) {
+        @ARGV = @{$request->{arg}};
+    } else {
+        @ARGV = ();
+    }
+	
+
 	if($command eq 'rpower'){
 		power($request, $callback);
-	}else{
+  }elsif ($command eq 'getmacs') {
+  	getmacs($request, $callback);
+	} elsif ($command  eq 'lssp'){
+		lssp($request, $callback);
+	} else{
 		$callback->({error=>["$command is not yet supported for UCS"],errorcode=>1});
 	}
 	return;
 }
 
 
-=item logon
 
-Establish a session with UCSM and return the logon cookie.
-This info was gotten from:
-http://developer.cisco.com/web/unifiedcomputing/forums/-/message_boards/view_message/2357013
-
-also:
-
-http://developer.cisco.com/web/unifiedcomputing/resources?p_p_id=20&p_p_lifecycle=0&p_p_state=maximized&p_p_mode=view&_20_struts_action=%2Fdocument_library%2Fview&_20_folderId=2144116
-
-=cut
+### Finished xCAT API
+#
+### Interal logic
 
 
-sub logon {
-	my $ucsm = shift;
-	my $username = shift;
-	my $password = shift;
+sub getmacs { 
+	my $request = shift;
 	my $callback = shift;
-
-	my $browser = LWP::UserAgent->new();
-
-	my $xmlcmd ="<aaaLogin inName='".$username."' inPassword='".$password."'></aaaLogin>";
-	my $url = 'http://'.$ucsm.'/nuova';
-	my $xml_header = "<?xml version='1.0'?>";
-	my $request = HTTP::Request->new(POST => $url);
-	$request->content_type("application/x-www-form-urlencoded");
-	$request->content($xmlcmd);
-
-	my $response = $browser->request($request);
-	# check to see that we could connecte
-	unless($response->is_success){
-		$callback->({error =>["$ucsm: " . $response->status_line],errorcode=>1});
-		return 0;
-	}
-	# check to see if there was an error logging in:
-	if($request->content =~ m/errorDescr/){
-		$request->content =~ m/errorDescr=\"([a-zA-Z0-9_\-\.]+)\".*/;
-		$callback->({error=>["Login failure: $1"],errorcode=>1});
-	}
-	#print Dumper($response);
-	my $lCookie;
-	# attempt to grab the outCookie from the login
-	eval {
-		my $lParser = XML::Simple->new();
-		my $lConfig = $lParser->XMLin($response->content);
-		#print Dumper($lConfig);
-		$lCookie = $lConfig->{'outCookie'};
-		
-		$lCookie = undef if ($lCookie && $lCookie eq "");
-		unless($lCookie){
-			$callback->({error=>["$ucsm: ". $lConfig->{errorDescr}],errorcode=>$lConfig->{errorCode}});
-		}
-		#print Dumper($lCookie);
-	};
-	if($@){
-		$callback->({error=>["Login failure trying to evaluate cookie"],errorcode=>1});
-		#print Dumper($@);
-	}
-	return $lCookie
-}
-
-=item doPostXML
-
-Run the XML command through UCS and return the output.
-this was taken and modified from the Cisco provided sample files here:
-
-http://developer.cisco.com/web/unifiedcomputing/resources?p_p_id=20&p_p_lifecycle=0&p_p_state=maximized&p_p_mode=view&_20_struts_action=%2Fdocument_library%2Fview&_20_folderId=2144116
-
-=cut
-
-sub doPostXML {
-    my ($aInUri, $aInPostData) = @_;
-
-    my $browser = LWP::UserAgent->new();
-    my $request = HTTP::Request->new(POST => $aInUri);
-    $request->content_type("application/x-www-form-urlencoded");
-    $request->content($aInPostData);
-
-    # Print out the request and response
-    #if ($lDebug==1)
-    #{
-    #    print ("\nRequest\n");
-    #    print ("-------\n");
-    #    print ($request->as_string() . "\n");
-    #}
-    my $resp = $browser->request($request);    #HTTP::Response object
-
-    #if ($lDebug==1)
-    #{
-    #    print ("\nHeaders\n");
-    #    print ("\nResponse\n");
-    #    print ("-------\n");
-    #    print ($resp->content() . "\n");
-    #}
-
-    return ($resp->content, $resp->status_line, $resp->is_success, $resp) if wantarray;
-    return unless $resp->is_success;
-    return $resp->content;
-}
-
-
-
-
-
-=item logout
-
-function to logout from the current session.  Need to make sure you do this or too many sessions get tied up!
-this was taken and modified from the Cisco provided sample files here:
-
-http://developer.cisco.com/web/unifiedcomputing/resources?p_p_id=20&p_p_lifecycle=0&p_p_state=maximized&p_p_mode=view&_20_struts_action=%2Fdocument_library%2Fview&_20_folderId=2144116
-
-=cut
-
-sub logout
-{
-    my ($aInUri, $aInCookie) = @_;
-    my $lXmlRequest = "<aaaLogout inCookie=\"REPLACE_COOKIE\" />";
-    $lXmlRequest =~ s/REPLACE_COOKIE/$aInCookie/;
-
-    my $lCookie = undef;
-    my ($lContent, $lMessage, $lSuccess) = doPostXML($aInUri, $lXmlRequest,1);
-
-
-    if ($lSuccess)
-    {
-        eval {
-            my $lParser = XML::Simple->new();
-            my $lConfig = $lParser->XMLin($lContent);
-            $lCookie = $lConfig->{'outCookie'};
-            $lCookie = undef if ($lCookie && $lCookie eq "");
-        };
+    my $mactab = xCAT::Table->new('mac',-create=>1);
+    my $nrtab = xCAT::Table->new('noderes');
+    if (!$nrtab) { 
+		$callback->({error => ["Can't open noderes table"],errorcode=>1});
+        return;
     }
-    return $lCookie;
+    my $ucsm = buildNodes($request->{node}, $callback);
+    my @node2dn = _profile2dn($ucsm);
+    for my $gn (@node2dn) { 
+        my %nodes = %{$gn->{nodes}};
+        my $ucsm = $gn->{ucsm};
+        for my $node (keys %nodes) {
+						
+        	my $nent = $nrtab->getNodeAttribs($node,['primarynic','installnic']);
+          my $mkey = $nent->{installnic} || $nent->{primarynic};
+          if (!$mkey) { 
+            $callback->({error=> ["please set noderes.installnic or noderes.primarynic for $node"], errorcode=>1});
+            next;
+          }
+					# nic can be anything, doesn't have to be eth0, eth1, etc.  could be something else.
+          #if ($mkey !~ /^eth\d+$/) { 
+          #    $callback->({error=> ["please set noderes.installnic or noderes.primarynic for $node in form eth1"], errorcode=>1});
+          #    next;
+          #}
+
+					my $s = $ucsm->get_scope($nodes{$node}{_profile}{dn}, 'vnicEther');
+          my %mac;
+					
+          for my $ifdn (values %{$s->{outConfigs}}) {
+						foreach my $if (keys %$ifdn){
+							# skip dynamic vNICs as these will be used by VMs
+							my $name = lc $ifdn->{$if}->{name};
+							my $addr = uc $ifdn->{$if}->{addr};
+							if($name =~/dynamic/){next};
+								$mac{$name} = $addr;
+								$callback->({node => [{name => [$node], data => [ {desc => [ $node . "-" . $name ],
+														contents => [ $addr]}]}]});
+
+							}
+					}
+            
+					if (not exists $mac{$mkey}) { 
+						$ucsm->err("%s: noderes.installnic or noderes.primarynic is set to be %s but there is no vNIC in the service profile with that name.\nPlease change noderes.installnic or noderes.primarynic to be one of the following: %s\n e.g: nodech %s noderes.primarynic=%s", $node, $mkey, join(",", keys %mac), $node, keys %mac);
+						next;
+					}
+	        	#$callback->({node => [ {name => [$node], data => [{desc => [
+            #    join ", ", values %mac], contents =>["blah"]}] } ]});
+                #join ", ", values %mac], contents =>["used: ".$mac{$mkey}]}] } ]});
+					my @macs;
+					push @macs, $mac{$mkey} ."!".$node;
+					foreach my $m (keys %mac){
+						if($m eq $mkey){
+							next
+						}
+						push @macs, $mac{$m} ."!".$node."-".$m;
+					}
+        	$mactab->setNodeAttribs($node,{mac=>join("|", @macs)});
+        }
+        $ucsm->logout();
+    }
+    $mactab->close();
+    $nrtab->close(); 
 }
-
-
-
-=item power 
-
-This function is responsible for sending power on/off/stat/boot/reset
-commands to the UCSM.
-
-=cut
-
 
 sub power {
 	my $request = shift;
 	my $callback = shift;
 	# get additional arguments
-    	if ($request->{arg}) {
-        	@ARGV = @{$request->{arg}};
-    	} else {
-        	@ARGV = ();
-    	}
-	
-	my $help;
-
 	my $usage = sub {
 		$callback->({data => 
 			[
 			"Usage: ",
-			"   rpower " . $request->{noderange}->[0] . " on|off|stat|reset|boot"
+			"   rpower " . $request->{noderange}->[0] . " on|off|stat|reset|boot|softoff|cycle"
 			]
 		});
 		return;
 	};
 
+    my $help = 0;
 	GetOptions(
 		'h|?|help' => \$help,
 	);
-
-
 	if($help){ $usage->($callback); return }
 
 	my $subcmd = shift( @ARGV);
@@ -275,229 +225,328 @@ sub power {
 		return;
 	}
 
-	unless($subcmd =~ /on|off|stat|reset|boot/){
+	unless($subcmd =~ /on|off|stat|reset|boot|cycle|softoff/){
 		$callback->({error => ["Invalid power action: $subcmd"],errorcode=>1});
 		$usage->();
 		return;
 	}
 
-	powerOp($request, $callback,$subcmd);
+    my $ucsm = buildNodes($request->{node}, $callback);
+	if($subcmd =~ /stat/){
+		powerStat($ucsm, $callback);
+	}
+    else{
+		powerOp($ucsm, $callback, $subcmd);
+	}
 }
-
-=item powerOp
-
-Function for running power operations
-
-=cut
 
 
 sub powerOp {
-	my $request = shift;
+	my $ucsm = shift;
 	my $callback = shift;
-	my $op = shift;
-	my $nh = buildNodeHash($request, $callback);
+	my $op = shift; 
+	unless($ucsm){
+		return;
+	}
+    my $error = 0;
+	foreach my $gn (@$ucsm){
+        if ($error) {
+            $gn->{ucsm}->logout();
+            next;
+        }
+		my $xml = "<configConfMo ^^cookie^^ dn='' inHierarchical='no'><inConfig>\n";
+        $xml .= "<lsPower dn='$_' state='$powermap{$op}' status='modified'/>\n" 
+            for values %{$gn->{nodes}};
+		$xml .= "</inConfig></configConfMo>\n";
+        my $resp = $gn->{ucsm}->_request($xml);
+        $gn->{ucsm}->logout();
+        if ($resp->{errorCode}) {
+            print Dumper $resp;
+            $callback->({error => $resp->{errorDescr}});
+            $error++;
+        }
+        else {
+	        $callback->({node => [ {name => [$_], data => [{desc => ["$gn->{nodes}{$_}"], 
+                contents =>[$op]}] } ]}) for keys %{$gn->{nodes}};
+        }
+	}	
+}
+
+
+
+sub powerStat {
+	my $nh = shift;
+	my $callback = shift;
 	unless($nh){
 		return;
 	}
-	$nh = getBladeInfoFromUCS($nh, $callback);
-	unless($nh){ return };
-
-	if($op =~ /stat/){
-		foreach my $ucsm (keys %$nh){
-			foreach my $nn (keys %{$nh->{$ucsm}->{nodes}} ){
-				my $c = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{chassisId};
-				my $s = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{slotId};
-				my $p = $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{operPower};
-				print Dumper($nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo});	
-				printPower($c, $s, $p, $nn, $callback);
-			}
-		}
-		return;
-	}
-
-	# translate:
-	if($op =~ /off/){
-		$op = "down";
-	}
-	# this is a power on/off request?
-	# go through each UCSM:
-	foreach my $ucsm (keys %$nh){
-		my @dns;
-		# get the name of the nodes?
-		foreach my $nn (keys %{$nh->{$ucsm}->{nodes}}){
-		
-			my $ddn =  $nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo}->{assignedToDn};
-			unless($ddn){
-				$callback->({error=>["$nn does not have a service profile associated with it"],errorcode=>1});
-				
-			}else{
-				push @dns, $ddn;
-			}
-			
-		}
-
-	#<configConfMos cookie="<cookie>" inHierarchical="true">
-  #<inConfigs>
-  #  <pair key="sys/chassis-1/blade-1">      <computeBlade adminPower="hard-reset-immediate" descr=""  dn="sys/chassis-1/blade-1" lc="discovered" name="" usrLbl="">      </computeBlade>    </pair>          </inConfigs></configConfMos>	
-#
-
-		my $cookie = logon($ucsm, $nh->{$ucsm}->{username}, $nh->{$ucsm}->{password},$callback);
-		unless($cookie){ next }
-	
-		my $xml = '<configConfMos cookie="'.$cookie.'" >'."\n";
-		$xml .= '<inConfigs>'."\n";
-		#foreach my $org (@dns){
-			#$xml .= '<pair key="' . $org . '/power">'."\n";
-			#$xml .= '<lsPower dn="' . $org. '/power" state="'.$op. '"/>'."\n";
-			#$xml .= '</pair>'."\n";
-			#$xml .= '<pair key="sys/chassis-1/blade-1/power">'."\n";
-			#$xml .= '<lsPower dn="sys/chassis-1/blade-1/power" state="'.$op. '"/>'."\n";
-			#$xml .= '</pair>'."\n";
-		#}
-		$xml .= '</inConfigs>'."\n";	
-		$xml .= '</configConfMos>'."\n";	
-		print Dumper($xml);
-		my ($lContent, $lMessage, $lSuccess) = doPostXML("http://$ucsm/nuova", $xml);
-		print Dumper($lContent);
-		
-			
-		
+    my @res = _profile2dn($nh); 
+	foreach my $gn (@res){
+        my %nodes = %{$gn->{nodes}};
+        my $blade = $gn->{ucsm}->get_dns(map {$_->{dn}} values %nodes);
+        my $blade_out = $blade->{outConfigs}->{computeBlade};
+        $blade_out = {$blade_out->{dn} => $blade_out} if $blade_out->{dn};
+        $blade_out->{$_}{dn}=$_ for keys %$blade_out;
+        my %cmap = map { $nodes{$_}{dn} => $_ } keys %nodes;
+        for (values %$blade_out) {
+            if (exists $cmap{$_->{dn}}) {
+                my $node = $cmap{$_->{dn}};
+            	$callback->({node => [ {
+                    name => [$node], 
+                    data => [{desc => ["$_->{dn}"], 
+                    contents =>[$_->{operPower}]}],
+                 }]});
+            }
+            else { 
+			        $callback->({error=>"Unknown profile returned",errorcode=>1});
+            }
+        }
+        $gn->{ucsm}->logout();
 	}
 }
   
 
-=item getBladeInfoFromUCS
+sub _profile2dn { 
+    my $nh = shift;
+    my @res;
+	foreach my $gn (@$nh){
+        my %res;
+        my %profile2n = map {$gn->{nodes}{$_} => $_ } keys %{$gn->{nodes}};
+        my $profile = $gn->{ucsm}->get_dns(values %{$gn->{nodes}});
+        my $profile_out = $profile->{outConfigs}->{lsServer};
+        # if several records returned, it outputed as subhashes, if only
+        # one - as flat hash
+        $profile_out = {$profile_out->{dn} => $profile_out} if $profile_out->{dn};
+        $profile_out->{$_}{dn}=$_ for keys %$profile_out;
+        for (values %$profile_out) {
+            if (exists $profile2n{$_->{dn}}) {
+                my $node = $profile2n{$_->{dn}};
+                my %n;
+                $n{configState} = $_->{configState};
+                $n{dn} = $_->{pnDn};
+                $n{node} = $node;
+                $n{_profile} = $_;
+								# when firmware updates are pending, node goes into applying state pending reboot.  Want to accept applying
+								# as well as applied.	
+                if ($n{configState} =~ /applied|applying/) {
+                    $res{$node} = \%n;
+                }
+                else {
+                    $n{configState} ||= 'UnknownState';
+			        $gn->{ucsm}->err("%s in %s state and not ready", 
+                        $node, $n{configState});
+                }
+            }
+            else { 
+			        $gn->{ucsm}->err("Unknown profile returned: %s", $_->{dn});
+            }
+        }
+        my $profile_unexist = $profile->{outUnresolved}{dn};
+        if ($profile_unexist) { 
+        for (ref $profile_unexist eq 'ARRAY' ? @{$profile_unexist} : $profile_unexist) {
+			$gn->{ucsm}->err("%s: service profile %s does not exist", $profile2n{$_->{value}}, $_->{value});
+        }
+        }
+        push @res, {ucsm=>$gn->{ucsm}, nodes=>\%res};
+    }
+    return @res;
+}
 
-Add the blade information from UCS into the hash.
+
+=item lssp
+
+print out the Service Profiles that are found on a UCS system:
+# lssp ucs101
+ucs101: esxi01
+ucs101: esxi02
+ucs101: esxi03
+...
+
+# lssp ucs101 esxi01
+
 
 =cut
 
-sub getBladeInfoFromUCS {
-	my $nh = shift;
-	my $callback = shift;
 
-	foreach my $ucsm (keys %$nh){
-		my $cookie = logon($ucsm, $nh->{$ucsm}->{username}, $nh->{$ucsm}->{password},$callback);
-		unless($cookie){
-			# don't let anyone continue unless we're authenticated
-			return 0;	
-		}
-		#	 now here is where we actually do something!
-		my $xml = '<configResolveDns cookie="'.$cookie.'" inHierarchical="false">'."\n";
-		$xml .= "<inDns>\n";
-		foreach my $node (keys %{$nh->{$ucsm}->{nodes}}){
-			my $ch = $nh->{$ucsm}->{nodes}->{$node}->{chassis};
-			my $s = $nh->{$ucsm}->{nodes}->{$node}->{slot};
-			$xml .= '<dn value="sys/chassis-'.$ch.'/blade-'.$s.'"/>'."\n";
-		}
-		$xml .= "</inDns>\n";
-		$xml .= "</configResolveDns>\n";
-		my ($lContent, $lMessage, $lSuccess) = doPostXML("http://$ucsm/nuova", $xml);
-		logout("http://$ucsm/nuova",$cookie);
-		if($lSuccess){
-			my $cmap = $nh->{$ucsm}->{cmap};
-       eval {
-       	my $lParser = XML::Simple->new();
-				# have to add the dn to the XML parser to get the blades right. 
-				my $lConfig = $lParser->XMLin($lContent, KeyAttr => 'dn');
-				my $bladeOut =  $lConfig->{outConfigs}->{computeBlade};
-				# this may be a list of blades
-				unless($bladeOut->{chassisId}){
-					foreach my $dn (keys %$bladeOut){
-						my $chassis = ($bladeOut->{$dn}->{chassisId});
-						my $slot = ($bladeOut->{$dn}->{slotId});
-						my $nn =  $cmap->{$chassis}->{$slot};
-						$nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo} = $bladeOut->{$dn};
-					}
-				}else{
-					# handle the case of a single node.
-					my $chassis = $bladeOut->{chassisId};
-					my $slot = $bladeOut->{slotId};
-					my $nn =  $cmap->{$chassis}->{$slot};
-					$nh->{$ucsm}->{nodes}->{$nn}->{ucsinfo} = $bladeOut;
-				}
-			};
-		}else{
-			print Dumper($@);
-			return 0;
-		}
-	}
-	return $nh;
-}
-
-
-
-
-sub printPower {
-	my $c = shift;
-	my $s = shift;
-	my $p = shift;
-	my $nn = shift;
-	my $callback = shift;
-	$callback->({node => [ {name => [$nn], data => [{desc => ["($c/$s)"], contents =>[$p]}] } ]});
-}
- 
-=item buildNodeHash
-
-buildNodeHash takes the noderange and builds a hash
-that looks like this:
-
-ucsm =>{
-
-	username
-
-	password
-
-	cmap
-		chassis
-			slot => nodename
-
-	node
-
-		nodename
-
-			chassis => 
-
-			slot => 
-
-		nodename
-
-			chassis => 
-
-			slot => 
-
-}
-
-IP address (or hostname) should be reachable
-username and password should be specified in the mpa or passwd table
-node chassis and slot information are defined in the mp table.
-	
-=cut
-
-sub buildNodeHash {
+sub lssp {
 	my $request = shift;
+	my $callback = shift;
+	# get UCSM information
+	
+  my $ucsm = getUCSMInfo($request->{node}, $callback);
+	unless($ucsm){ return 0 }
+	my $xml = "<configResolveClass classId=\"lsServer\" inHierarchical=\"false\" ^^cookie^^ />";
+	foreach my $ucs (keys %$ucsm){
+  	my $resp = $ucsm->{$ucs}{ucsm}->_request($xml);
+		printSPs($ucs, $resp, $callback);		
+  	$ucsm->{$ucs}{ucsm}->logout();
+	}
+}
+
+=item printSPs
+
+Output is expected to be something like:
+    'classId' => 'lsServer',
+          'response' => 'yes',
+          'outConfigs' => {
+                          'lsServer' => {
+                                        'org-root/org-vallard-test/ls-lucky06' => {
+					'mgmtFwPolicyName' => '2.0-1t',
+          'fsmStatus' => 'nop',
+          'fltAggr' => '1',
+          'operScrubPolicyName' => 'org-root/scrub-default',
+          'uuid' => '00000000-0000-0000-cafe-00000000000f',
+          'operVconProfileName' => '',
+          'fsmTry' => '0',
+          'usrLbl' => '',
+          'solPolicyName' => '',
+          'bootPolicyName' => 'ESX-PXEBoot',
+          'statsPolicyName' => 'default',
+          'vconProfileName' => '',
+					'pnDn' => '',
+          'fsmRmtInvRslt' => '',
+          'name' => 'Server-Template-1',
+          'hostFwPolicyName' => 'B200-M2-2.0',
+          'srcTemplName' => '',
+          'descr' => 'Test template',
+          'fsmRmtInvErrCode' => 'none',
+          'operSrcTemplName' => '',
+          'type' => 'initial-template',
+          'intId' => '3168361',
+          'operStatsPolicyName' => 'org-root/org-tige-test/thr-policy-default',
+          'operMgmtAccessPolicyName' => '',
+          'configQualifier' => '',
+          'operBiosProfileName' => '',
+          'mgmtAccessPolicyName' => '',
+          'biosProfileName' => 'vallard-test',
+          'fsmStamp' => 'never',
+          'powerPolicyName' => 'default',
+          'operSolPolicyName' => '',
+          'fsmProgr' => '100',
+          'operHostFwPolicyName' => 'org-root/fw-host-pack-B200-M2-2.0',
+          'operState' => 'unassociated',
+          'operMaintPolicyName' => 'org-root/maint-user-ack',
+          'fsmPrev' => 'nop',
+          'uuidSuffix' => '0000-000000000000',
+          'operBootPolicyName' => '',
+          'configState' => 'not-applied',
+          'fsmStageDescr' => '',
+          'operLocalDiskPolicyName' => 'org-root/local-disk-config-RAID-1',
+          'operPowerPolicyName' => 'org-root/org-tige-test/power-policy-default',
+          'owner' => 'management',
+          'operIdentPoolName' => 'org-root/uuid-pool-default',
+          'operMgmtFwPolicyName' => 'org-root/fw-mgmt-pack-B200-M2-2.0',
+          'identPoolName' => 'vallard-test',
+          'agentPolicyName' => '',
+          'scrubPolicyName' => '',
+          'fsmFlags' => '',
+          'localDiskPolicyName' => 'RAID-1',
+          'operDynamicConPolicyName' => '',
+          'fsmRmtInvErrDescr' => '',
+          'assignState' => 'unassigned',
+          'extIPState' => 'none',
+          'assocState' => 'unassociated',
+          'fsmDescr' => '',
+          'maintPolicyName' => 'user-ack',
+          'dynamicConPolicyName' => ''
+
+=cut
+
+
+
+sub printSPs {
+	my $ucs = shift;
+	my $resp = shift;
+	my $callback = shift;
+	unless($resp->{outConfigs}->{lsServer}) { 
+		$callback->({error=>["XML response for printing service profiles is not formatted as we expect it."],errorcode=>1});
+		return;
+	}
+	my @unassigned;
+	#print Dumper($resp);	
+	foreach my $sp (keys %{$resp->{outConfigs}->{lsServer}}){
+		#print Dumper $resp->{outConfigs}->{lsServer}->{$sp};
+    my $aB = $resp->{outConfigs}->{lsServer}->{$sp}->{pnDn};
+		unless($aB){
+			push @unassigned, $sp;
+			next;
+		}
+	 	$callback->({node => 
+									[ {name => [$ucs], 
+										data => [{desc => [
+               					#$resp->{outConfigs}->{lsServer}->{$sp}->{name}
+												$sp
+												], 
+											contents => [ 
+												$aB
+											]
+							}
+							] } ]});
+	}
+
+	foreach (@unassigned){
+	 	$callback->({node => 
+									[ {name => [$ucs], 
+										data => [{desc => [
+												$_
+												], 
+											contents => [ 
+												"unassigned"
+											]
+							}
+							] } ]});
+		
+	}
+
+
+}
+
+
+sub getUCSMInfo {
+	my $ucsH;
+	my $nodes = shift;
+	my $callback = shift;
+	my $mpaTab = xCAT::Table->new('mpa');
+	if(!$mpaTab){
+		$callback->({error=>"Error opening mpa table",errorcode=>1});
+		return 0;
+	}
+	foreach my $ucs (@$nodes){
+		my $ent = $mpaTab->getAttribs({mpa=>$ucs},'username','password');		
+		if (not $ent and $ent->{password} and $ent->{username}){
+ 			$callback->({error=>["No username or password specified in mpa.{username,password} table.  Please specify a username and password"],errorcode=>1});
+			#continue;
+			next;
+		}
+		$ucsH->{$ucs}{ucsm} = xCAT_plugin::ucs->new($callback, $ucs, $ent->{username}, $ent->{password}, $callback);
+		if(! $ucsH->{$ucs}{ucsm}){
+			delete $ucsH->{$ucs}{ucsm};
+		}	
+	}
+	return $ucsH;
+}
+
+sub buildNodes {
+	my $nodes = shift;
 	my $callback = shift;
 	my $errors = 0;
 	# build the right stuff here!
-	my $nh; # the node hash
-	my $nodes = $request->{node};
-	#print Dumper($nodes);
+	my %nh; # the node hash
 	
 
-	my @tabs = qw(mp mpa passwd);
+	my @tabs = qw(mp mpa);
 	my %db = ();
 	# open all the tables.
-	foreach(@tabs){
-		$db{$_} = xCAT::Table->new($_);
-		if(!$db{$_}){
-			$callback->({error=>"Error opening $_ table",errorcode=>1});
+	for my $table (qw(mp mpa)) {
+		$db{$table} = xCAT::Table->new($table);
+		if(!$db{$table}){
+			$callback->({error=>"Error opening $table table",errorcode=>1});
 			return 0;
 		}
 	}	
 	
 	# first get the mpas.
 	my $mph = $db{'mp'}->getNodesAttribs($nodes, [qw(mpa id)]);
-	#print Dumper($mph);
 	foreach my $node (@$nodes){
 		unless($mph->{$node}->[0] && $mph->{$node}->[0]->{mpa}){
 			$errors++;
@@ -506,94 +555,128 @@ sub buildNodeHash {
 		}
 
 		unless($mph->{$node}->[0]->{id}){
-			$callback->({error=>["$node: No management id specified.  Please change mp.id to be chassis/slot, eg: 1/1"],errorcode=>1});
+			$callback->({error=>["$node: No management id specified.  Please change mp.id to be service profile"],errorcode=>1});
 			next;	
 		}
 
 		my $id = $mph->{$node}->[0]->{id};
-		unless($id =~ /\//){
-			$callback->({error=>["$node: Invalid ID.  Please change mp.id to be chassis/slot, eg: 1/1"],errorcode=>1});
-			next;
-		}
-		# id should be chassis/slot
-		my ($chassis,$slot) = split('/', $id);
-		#should make sure this is numeric
 		
-		my $currUCSM = $mph->{$node}->[0]->{mpa};
-		unless($nh->{$currUCSM}){
-			$nh->{$currUCSM}->{nodes} = ();
-		}
-		unless($nh->{$currUCSM}->{cmap}){
-			$nh->{$currUCSM}->{cmap} = {};
-		}
-		# map node to chassis/slot
-		$nh->{$currUCSM}->{nodes}->{$node} = {chassis => $chassis,slot => $slot};
+		my $ucsm_host = $mph->{$node}->[0]->{mpa};
+        $nh{$ucsm_host} ||= { 
+            ucsm => undef, 
+            nodes =>{}, 
+        }; 
 
-		# the reverse: map chassis/slot to node
-		$nh->{$currUCSM}->{cmap}->{$chassis}->{$slot} = $node;
+		$nh{$ucsm_host}{nodes}{$node} = $id;
 	}
 
-
-	# The rest of this is just username and password stuff
-
-
-	# first get the default user/password 
-	my $passh = $db{'passwd'}->getAttribs({key=>'ucs'},'username','password');
-	my $defaultUser = "";
-	my $defaultPasswd = "";
-	if($passh){
-		#print Dumper($passh);
-		$defaultUser = $passh->{username};	
-		$defaultPasswd = $passh->{password};	
-	}
-	#my $mpah = $db{'mpa'}->getNodeAttribs(qw(mpa, username, password))
-	
 	# now get the user and password for the mpas
-	foreach my $ucsm (keys %$nh){
+	foreach my $ucsm (keys %nh){
 		my $ent = $db{'mpa'}->getAttribs({mpa=>$ucsm},'username','password');		
-		unless($ent){
-		# if nothing specified in mpa table then add default
-			if($defaultUser && $defaultPasswd){
-				$nh->{$ucsm}->{username} = $defaultUser;
-				$nh->{$ucsm}->{password} = $defaultPasswd;
-			}else{
-				$callback->({error=>["No username or password specified in mpa.{username,password} nor passwd.{username,password} table.  Please specify a username and password"],errorcode=>1});
-				$errors++;
-				next;
-			}
+		if (not $ent and $ent->{password} and $ent->{username}){
+            $callback->({error=>["No username or password specified in mpa.{username,password} table.  Please specify a username and password"],errorcode=>1});
+            $errors++;
+            next;
 		}else{
-			# set the password
-			#print Dumper($ent);
-			if($ent->{password}){
-					$nh->{$ucsm}->{password} = $ent->{password};
-			}else{
-				if($defaultPasswd){
-					$nh->{$ucsm}->{password} = $defaultPasswd;
-				}else{
-					$callback->({error=>["No password specified in mpa.password nor passwd.password table.  Please specify a username and password"],errorcode=>1});
-					$errors++;
-					next;		
-				}
-			}
-
-			if($ent->{username}){
-					$nh->{$ucsm}->{username} = $ent->{username};
-			}else{
-				if($defaultUser){
-					$nh->{$ucsm}->{username} = $defaultUser;
-				}else{
-					$callback->({error=>["No username specified in mpa.username nor passwd.username table.  Please specify a username and password"],errorcode=>1});
-					$errors++;
-					next;		
-				}
-			}
+            $nh{$ucsm}{ucsm} = xCAT_plugin::ucs->new($callback, $ucsm, 
+                $ent->{username}, $ent->{password}, $callback);
+            if (!$nh{$ucsm}{ucsm}) {
+                #login error
+                delete $nh{$ucsm};
+            }
 		}
 	}
 	
 	if($errors){
 		return 0;
 	}
-	#print Dumper($nh);
-	return $nh;
+	return [values %nh];
 } 
 
+### Working with UCSM
+#
+
+sub new { 
+    my ($class, $callback, $host, $login, $password) = @_;
+    my $self = { 
+        host =>             $host,
+        login =>            $login,
+        password =>         $password,
+        callback =>         $callback,
+        _cookie =>          '',
+    };
+    #TODO error check
+    bless $self, $class;
+    $self->login();
+    return $self;
+}
+
+sub login {
+    my $self = shift;
+	my $xmlcmd =sprintf "<aaaLogin inName='%s' inPassword='%s'></aaaLogin>", 
+        $self->{login}, $self->{password};
+    my $resp = $self->_request($xmlcmd);
+	return $self->err("login failure: %s", $resp->{errorDescr}) if $resp->{errorDescr}; 
+	$self->{_cookie} = $resp->{'outCookie'};
+	return $self->{_cookie};
+}
+
+sub logout {
+    my $self = shift;
+    $self->_request(sprintf "<aaaLogout inCookie='%s' />", $self->{_cookie});
+    return;
+}
+
+sub get_dns { 
+    my $self = shift;
+    my @dns = @_;
+	my $xml = '<configResolveDns ^^cookie^^ inHierarchical="false">'."\n";
+	$xml .= "<inDns>\n";
+	$xml .= "<dn value=\"$_\"/>\n" for @dns; 
+	$xml .= "</inDns>\n";
+	$xml .= "</configResolveDns>\n";
+    return $self->_request($xml);
+}
+
+sub get_scope { 
+    my $self = shift;
+    my ($dn, $class) = @_;
+    my $xml = sprintf '<configScope ^^cookie^^ dn="%s" inClass="%s" inHierarchical="false"'.
+        ' inRecursive="false"><inFilter></inFilter></configScope>', $dn, $class;
+    return $self->_request($xml);
+}
+
+sub _request {
+    my ($self, $cmd) = @_;
+    $cmd =~ s/\^\^cookie\^\^/ cookie="$self->{_cookie}" /gs;
+print " --> $cmd\n" if $ENV{DEBUG};
+    my $browser = LWP::UserAgent->new();
+	my $url = sprintf 'http://%s/nuova', $self->{host};
+	my $xml_header = "<?xml version='1.0'?>";
+	my $request = HTTP::Request->new(POST => $url);
+	$request->content_type("application/x-www-form-urlencoded");
+	$request->content($cmd);
+
+	my $response = $browser->request($request);
+	unless($response->is_success){
+		return $self->err("xml fetch error: %s", $response->status_line);
+	}
+print " <-- ".$response->content."\n\n" if $ENV{DEBUG};
+	my $parser = XML::Simple->new();
+   my $xml = eval {$parser->XMLin($response->content, KeyAttr => 'dn')};
+    return $self->err("parsing xml %s\n----\n%s\n----\n", $@, 
+        $response->content) if $@;
+    return $xml;
+};
+
+sub err { 
+    my ($self, $msg) = (shift, shift);
+    my @params = @_;
+    my $msg = "%s/".$msg;
+    $self->{callback}->({error=>[sprintf $msg, $self->{host}, @params], errorcode=>1});
+    #TODO make error bubling
+    return 0;  
+}
+
+
+1;
