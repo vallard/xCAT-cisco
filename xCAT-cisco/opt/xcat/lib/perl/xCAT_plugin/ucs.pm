@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # vallard@benincosa.com
-# vallard@cisco.com
+# vallardx@cisco.com
 # © 2011 Cisco Systems, Inc. All rights reserved.
 # nsavin@griddynamics.com
 
@@ -70,7 +70,6 @@ sub handled_commands {
   return {
     rpower => 'nodehm:power,mgt',
     getmacs => 'nodehm:getmac,mgt',
-		lsflexnode => 'ucs'    ,
 		lssp => 'ucs'    
   };
 }
