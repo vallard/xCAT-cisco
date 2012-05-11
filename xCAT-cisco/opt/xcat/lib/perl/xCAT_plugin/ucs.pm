@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # vallard@benincosa.com
 # vallardx@cisco.com
-# © 2011 Cisco Systems, Inc. All rights reserved.
+# © 2011-2012 Cisco Systems, Inc. All rights reserved.
 # nsavin@griddynamics.com
 
 package xCAT_plugin::ucs;
@@ -70,7 +70,9 @@ sub handled_commands {
   return {
     rpower => 'nodehm:power,mgt',
     getmacs => 'nodehm:getmac,mgt',
-		lssp => 'ucs'    
+		lsflexnode => 'ucs',
+		lssp => 'ucs',
+		rinv => 'nodehm:mgt'
   };
 }
 
@@ -115,8 +117,10 @@ sub process_request {
 		power($request, $callback);
   }elsif ($command eq 'getmacs') {
   	getmacs($request, $callback);
-	} elsif ($command  eq 'lssp'){
+	} elsif ($command  eq 'lssp' || $command eq 'lsflexnode'){
 		lssp($request, $callback);
+	} elsif ($command  eq 'rinv'){
+		rinv($request, $callback);
 	} else{
 		$callback->({error=>["$command is not yet supported for UCS"],errorcode=>1});
 	}
@@ -197,6 +201,25 @@ sub getmacs {
     $nrtab->close(); 
 }
 
+
+sub rinv {
+	my $request = shift;
+	my $callback = shift;
+	my $usage = sub {
+		$callback->({data => [ "Usage: ", "   rinv " . $request->{noderange}->[0] . "all|bios" ]});
+		return;
+	};
+
+	my $help = 0;
+	GetOptions( 'h|?|help' => \$help, );
+	if($help){$usage->($callback); return }
+	my $subcmd = shift(@ARGV);
+	my $ucsm = buildNodes($request->{node}, $callback);
+	inv($ucsm, $callback);
+}
+
+
+
 sub power {
 	my $request = shift;
 	my $callback = shift;
@@ -240,6 +263,12 @@ sub power {
 }
 
 
+
+
+
+
+
+
 sub powerOp {
 	my $ucsm = shift;
 	my $callback = shift;
@@ -260,17 +289,136 @@ sub powerOp {
         my $resp = $gn->{ucsm}->_request($xml);
         $gn->{ucsm}->logout();
         if ($resp->{errorCode}) {
-            print Dumper $resp;
+            #print Dumper $resp;
             $callback->({error => $resp->{errorDescr}});
             $error++;
         }
         else {
-	        $callback->({node => [ {name => [$_], data => [{desc => ["$gn->{nodes}{$_}"], 
+						my $desc = $_->{dn};
+								$desc =~ s/sys\///g;
+								$desc =~ s/-//g;
+	        $callback->({node => [ {name => [$_], data => [{desc => [ $gn->{nodes}{$_}], 
                 contents =>[$op]}] } ]}) for keys %{$gn->{nodes}};
         }
 	}	
 }
 
+
+=item inv
+
+Possible values:
+         'adminPower' => 'policy',
+          'model' => 'N20-B6620-1',
+          'fsmStatus' => 'nop',
+          'numOfCoresEnabled' => '8',
+          'fltAggr' => '68719476736',
+          'uuid' => '00000000-0000-0000-dead-beef00000007',
+          'numOfEthHostIfs' => '6',
+          'serverId' => '2/1',
+          'chassisId' => '2',
+          'fsmTry' => '0',
+          'usrLbl' => '',
+          'presence' => 'equipped',
+          'serial' => 'QCI1412A116',
+          'fsmRmtInvRslt' => '',
+          'name' => '',
+          'discovery' => 'complete',
+          'connStatus' => 'A,B',
+          'descr' => '',
+          'fsmRmtInvErrCode' => 'none',
+          'revision' => '0',
+          'mfgTime' => '2010-03-25T01:00:00.000',
+          'lcTs' => '1969-12-31T16:00:00.000',
+          'checkPoint' => 'discovered',
+          'operPower' => 'off',
+          'intId' => '2715902',
+          'availableMemory' => '49152',
+          'managingInst' => 'B',
+          'lowVoltageMemory' => 'regular-voltage',
+          'fsmStamp' => '2012-04-12T20:54:25.868',
+          'availability' => 'unavailable',
+          'fsmProgr' => '100',
+          'operState' => 'power-off',
+          'numOfThreads' => '16',
+          'fsmPrev' => 'SoftShutdownSuccess',
+          'association' => 'associated',
+          'fsmStageDescr' => '',
+          'connPath' => 'A,B',
+          'slotId' => '1',
+          'fsmFlags' => '',
+          'numOfAdaptors' => '1',
+          'memorySpeed' => '1333',
+          'fsmRmtInvErrDescr' => '',
+          'operability' => 'operable',
+          'totalMemory' => '49152',
+          'assignedToDn' => 'org-root/org-vallard-test/ls-lucky02',
+          'numOfCores' => '8',
+          'lc' => 'discovered',
+          'adminState' => 'in-service',
+          'operQualifier' => '',
+          'fsmDescr' => '',
+          'dn' => 'sys/chassis-2/blade-1',
+          'numOfCpus' => '2',
+          'numOfFcHostIfs' => '2',
+          'originalUuid' => 'dd8c55e1-3774-11df-bf46-18a905163202',
+          'vendor' => 'Cisco Systems Inc'
+
+
+=cut
+
+
+
+sub inv {
+	my $ucsm = shift;
+	my $callback = shift;
+	unless($ucsm){
+		return;
+	}
+	# key is what user sees.  value is ucs key word.
+	my %inv_hash = (
+		'memory available' => 'availableMemory',
+		'memory total' => 'totalMemory',
+		'memory speed' => 'memorySpeed',
+		'model' => 'model',
+		'number of CPUs' => 'numOfCpus',
+		'number of cores' => 'numOfCores',
+		'number of cores enabled' => 'numOfCoresEnabled',
+		'number of ethernet interfaces' => 'numOfEthHostIfs',
+		'number of fc interfaces' => 'numOfFcHostIfs',
+		'serial number' => 'serial',
+		'server chassis' => 'chassisId',
+		'server slot' => 'slotId',
+		'uuid' => 'uuid', 
+		'uuid original' => 'originalUuid',
+		'vendor' => 'vendor',
+	);
+
+
+
+	my @res = _profile2dn($ucsm);
+	foreach my $gn (@res){
+		my %nodes = %{$gn->{nodes}};  # hash of nodename => service profile name
+		my $blade = $gn->{ucsm}->get_dns(map {$_->{dn}} values %nodes);
+		my $blade_out = $blade->{outConfigs}->{computeBlade};
+		# if less than one have to change the hash
+		$blade_out = {$blade_out->{dn} => $blade_out} if $blade_out->{dn};
+		$blade_out->{$_}{dn}=$_ for keys %$blade_out;
+		my %cmap = map { $nodes{$_}{dn} => $_ } keys %nodes;
+		for my $bo (values %$blade_out) {
+			if (exists $cmap{$bo->{dn}}) {
+				my $node = $cmap{$bo->{dn}};
+				#print Dumper $bo;
+				foreach my $key (sort keys %inv_hash){
+					$callback->({node => [ {
+						name => [$node], 
+						data => [{desc => [$key], 
+						contents =>[$bo->{$inv_hash{$key}}]}],
+					}]});
+				}
+			}
+		}	
+	}
+}
 
 
 sub powerStat {
@@ -279,7 +427,7 @@ sub powerStat {
 	unless($nh){
 		return;
 	}
-    my @res = _profile2dn($nh); 
+	my @res = _profile2dn($nh); 
 	foreach my $gn (@res){
         my %nodes = %{$gn->{nodes}};
         my $blade = $gn->{ucsm}->get_dns(map {$_->{dn}} values %nodes);
@@ -290,9 +438,12 @@ sub powerStat {
         for (values %$blade_out) {
             if (exists $cmap{$_->{dn}}) {
                 my $node = $cmap{$_->{dn}};
+								my $desc = $_->{dn};
+								$desc =~ s/sys\///g;
+								$desc =~ s/-//g;
             	$callback->({node => [ {
                     name => [$node], 
-                    data => [{desc => ["$_->{dn}"], 
+                    data => [{desc => [$desc], 
                     contents =>[$_->{operPower}]}],
                  }]});
             }
