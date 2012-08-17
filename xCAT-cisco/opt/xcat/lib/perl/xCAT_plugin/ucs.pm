@@ -167,6 +167,10 @@ sub getmacs {
 					
           for my $ifdn (values %{$s->{outConfigs}}) {
 						foreach my $if (keys %$ifdn){
+							unless($if){
+								$callback->({error =>["vNIC interface: $if does not have a name.  This may be a bug in the code"], errorcode =>1});
+								next;
+							}
 							# skip dynamic vNICs as these will be used by VMs
 							my $name = lc $ifdn->{$if}->{name};
 							my $addr = uc $ifdn->{$if}->{addr};
@@ -514,6 +518,7 @@ ucs101: esxi03
 
 # lssp ucs101 esxi01
 
+# lssp 
 
 =cut
 
@@ -521,7 +526,26 @@ ucs101: esxi03
 sub lssp {
 	my $request = shift;
 	my $callback = shift;
+	my $help;
+	my $lsspUsage = sub {
+		my %rsp;
+		push @{$rsp{data}}, "Usage: lssp <ucs manager>";
+		push @{$rsp{data}}, "       Gets all the service profiles inside of UCS Manager.";
+		push @{$rsp{data}}, "       Service profiles that are associated with nodes are displayed first.";
+		push @{$rsp{data}}, "       UCS Manager information should be populated in the mpa table.";
+		$callback->(\%rsp);
+	};
 	# get UCSM information
+	if($request->{arg}){
+		@ARGV = @{$request->{arg}};
+		GetOptions(
+			'h|?|help' => \$help
+		);
+		if($help){
+			$lsspUsage->();	
+			return;
+		}
+	}
 	
   my $ucsm = getUCSMInfo($request->{node}, $callback);
 	unless($ucsm){ return 0 }
@@ -661,6 +685,25 @@ sub getUCSMInfo {
 		$callback->({error=>"Error opening mpa table",errorcode=>1});
 		return 0;
 	}
+
+	# if user doesn't specify UCSM on the command line go and get all of them.
+	if(! $nodes){
+		my @m = ("password", 'username');
+		my $n = $mpaTab->getAllEntries;
+		my $newNodes;
+		#print Dumper($n);
+		if(@$n == 0 ){
+			$callback->({error=>"There are no enabled entries in the mpa table",errorcode=>1});
+			return 0;
+		}
+		foreach my $h (@$n){
+			if($h->{mpa}){
+				push @$newNodes, $h->{mpa};
+			}
+		}
+		$nodes = $newNodes;
+	}
+
 	foreach my $ucs (@$nodes){
 		my $ent = $mpaTab->getAttribs({mpa=>$ucs},'username','password');		
 		if (not $ent and $ent->{password} and $ent->{username}){
