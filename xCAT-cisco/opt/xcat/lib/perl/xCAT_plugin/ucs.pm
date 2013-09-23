@@ -547,7 +547,7 @@ sub lssp {
 		}
 	}
 	
-  my $ucsm = getUCSMInfo($request->{node}, $callback);
+  	my $ucsm = getUCSMInfo($request->{node}, $callback);
 	unless($ucsm){ return 0 }
 	my $xml = "<configResolveClass classId=\"lsServer\" inHierarchical=\"false\" ^^cookie^^ />";
 	foreach my $ucs (keys %$ucsm){
@@ -688,27 +688,45 @@ sub getUCSMInfo {
 
 	# if user doesn't specify UCSM on the command line go and get all of them.
 	if(! $nodes){
-		my @m = ("password", 'username');
-		my $n = $mpaTab->getAllEntries;
-		my $newNodes;
-		#print Dumper($n);
-		if(@$n == 0 ){
-			$callback->({error=>"There are no enabled entries in the mpa table",errorcode=>1});
-			return 0;
-		}
-		foreach my $h (@$n){
-			if($h->{mpa}){
-				push @$newNodes, $h->{mpa};
-			}
-		}
-		$nodes = $newNodes;
+		$callback->({error => "No UCS Fabric Interconnects Specified", errorcode=> 1});
+		return 0;
+
+		#my @m = ("password", 'username');
+		#my $n = $mpaTab->getAllEntries;
+		#my $newNodes;
+		##print Dumper($n);
+		#if(@$n == 0 ){
+		#	$callback->({error=>"There are no enabled entries in the mpa table",errorcode=>1});
+		#	return 0;
+		#}
+		#foreach my $h (@$n){
+		#	if($h->{mpa}){
+		#		push @$newNodes, $h->{mpa};
+		#	}
+		#}
+		#$nodes = $newNodes;
 	}
 
 	foreach my $ucs (@$nodes){
+		my $errCount = 0;
 		my $ent = $mpaTab->getAttribs({mpa=>$ucs},'username','password');		
-		if (not $ent and $ent->{password} and $ent->{username}){
- 			$callback->({error=>["No username or password specified in mpa.{username,password} table.  Please specify a username and password"],errorcode=>1});
-			#continue;
+		# check that there is an entry
+		if (! $ent){
+			$errCount++;
+			$callback->({error=>["$ucs: No entry in mpa table."],errorcode=>1});
+		}else {
+				if ($ent->{password} eq ""){
+					$errCount++;
+					$callback->({error=>["$ucs: No password specified in mpa table."],errorcode=>1});
+				}
+			
+				if ($ent->{username} eq ""){
+					$errCount++;
+					$callback->({error=>["$ucs: No user specified in mpa table."],errorcode=>1});
+				}
+		}
+
+		if($errCount){
 			next;
 		}
 		$ucsH->{$ucs}{ucsm} = xCAT_plugin::ucs->new($callback, $ucs, $ent->{username}, $ent->{password}, $callback);
@@ -798,7 +816,7 @@ sub new {
         callback =>         $callback,
         _cookie =>          '',
     };
-    #TODO error check
+
     bless $self, $class;
     $self->login();
     return $self;
@@ -844,7 +862,7 @@ sub _request {
     $cmd =~ s/\^\^cookie\^\^/ cookie="$self->{_cookie}" /gs;
 print " --> $cmd\n" if $ENV{DEBUG};
     my $browser = LWP::UserAgent->new();
-	my $url = sprintf 'http://%s/nuova', $self->{host};
+	my $url = sprintf 'https://%s/nuova', $self->{host};
 	my $xml_header = "<?xml version='1.0'?>";
 	my $request = HTTP::Request->new(POST => $url);
 	$request->content_type("application/x-www-form-urlencoded");

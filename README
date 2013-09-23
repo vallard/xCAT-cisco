@@ -43,24 +43,53 @@ rpm -ivh xCAT-cisco*rpm
 
 Configuration Instructions
 
-* Make a group called ucsnodes
-nodech <nodes> groups,=ucsnodes
-
-* Set the nodes management interface
-nodech ucsnodes nodehm.mgt=ucs
 
 * Add the UCSM to the nodelist
-nodeadd <my ucsm virtual ip address> groups=ucsm
+nodeadd <my ucsm virtual ip address> groups=ucs-domain
+e.g: nodeaddd ucs001 groups=ucs-domain
 
 * Add UCS to the mpa tab
 tabedit mpa
 Add the following line:
-ucsm,<userid>,<password>
+<UCS>,<userid>,<password>
 
 In my case:
-ucsm,admin,cisco.123
+ucs001,admin,cisco.123
 
-* Add UCS blades to mp table
+* Make sure that SSL is enabled on UCS Manager via the GUI
+- This can be done in Admin -> Communication Management -> HTTPS
+- This version of the plugin will not work with HTTP, only HTTPS
+
+* Verify you can get service profiles from UCS Managers
+lssp <ucs fabric interconnect>
+e.g.:
+	lssp ucs001
+	lssp ucs001,ucs008,ucs0[11-12]
+
+* Add blades
+nodeadd  blade001-blade120 groups,=ucsnodes
+
+* Set the nodes management interface
+nodech ucsnodes nodehm.mgt=ucs
+
+* Add an entry for each service profile to map it to the node in the mp table
+
+tabedit mp
+
+#node,mpa,id,nodetype,comments,disable
+"blade001","ucs001","org-root/ls-ESXi-1000v-01",,,
+"blade002","ucs001","org-root/ls-ESXi-1000v-02",,,
+...
+
+* run a command to make sure it works:
+[root@xcat ~]# rinv blade001
+blade001: memory available: 49152
+blade001: memory speed: 1067
+...
+
+* Troubleshooting:
 
 If you have questions please send them my way:
 vallard@benincosa.com
+-or-
+xcat@cisco.com
