@@ -1,0 +1,4 @@
+0.3 (9/23/2013)
+- Can't do lssp with no options anymore.  Did this to not pollute other MPA items.
+- SSL is the only supported way.  Most of the 302 errors we were getting before were due to http to https redirections.  This way the error goes away, but you *MUST* use SSL. (HTTPS instead of HTTP).  This is enabled in the Admin -> Communication Management -> HTTPS section in the GUI.
+- Error checking.  Now we don't let you get very far unless you have a username and password defined in the MPA table for all UCS Manager domains.

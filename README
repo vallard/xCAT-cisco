@@ -15,11 +15,14 @@ For more information on xCAT see: http://xcat.sf.net
 
 Installation instructions:
 
-When this is complete, there will be an RPM that you should see on this page. Simply download
-the RPM and install it *after* you have installed xCAT.  
-For information on how to install xCAT see: 
+*AFTER* you have installed xCAT.  
+Get the RPM here: http://benincosa.com/xCAT/
 
+For information on how to install xCAT see: 
 http://sumavi.com/sections/local-installation
+- And -
+The xCAT documentation wiki here:
+http://sourceforge.net/apps/mediawiki/xcat/index.php?title=XCAT_on_Cisco_UCS_B-Series_Blades
 
 
 Building Instructions
