@@ -861,7 +861,12 @@ sub _request {
     my ($self, $cmd) = @_;
     $cmd =~ s/\^\^cookie\^\^/ cookie="$self->{_cookie}" /gs;
     print " --> $cmd\n" if $ENV{DEBUG};
-    my $browser = LWP::UserAgent->new(ssl_opts => {verify_hostname => 0});
+    my $browser = LWP::UserAgent->new(
+      ssl_opts => {
+	    verify_hostname => 0,
+	    SSL_verify_mode => IO::Socket::SSL::SSL_VERIFY_NONE
+      }
+    );
     my $url = sprintf 'https://%s/nuova', $self->{host};
     my $xml_header = "<?xml version='1.0'?>";
     my $request = HTTP::Request->new(POST => $url);
