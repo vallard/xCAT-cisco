@@ -824,12 +824,12 @@ sub new {
 
 sub login {
     my $self = shift;
-	my $xmlcmd =sprintf "<aaaLogin inName='%s' inPassword='%s'></aaaLogin>", 
-        $self->{login}, $self->{password};
+    my $xmlcmd =sprintf "<aaaLogin inName='%s' inPassword='%s'></aaaLogin>", 
+                $self->{login}, $self->{password};
     my $resp = $self->_request($xmlcmd);
-	return $self->err("login failure: %s", $resp->{errorDescr}) if $resp->{errorDescr}; 
-	$self->{_cookie} = $resp->{'outCookie'};
-	return $self->{_cookie};
+    return $self->err("login failure: %s", $resp->{errorDescr}) if $resp->{errorDescr}; 
+    $self->{_cookie} = $resp->{'outCookie'};
+    return $self->{_cookie};
 }
 
 sub logout {
@@ -860,21 +860,25 @@ sub get_scope {
 sub _request {
     my ($self, $cmd) = @_;
     $cmd =~ s/\^\^cookie\^\^/ cookie="$self->{_cookie}" /gs;
-print " --> $cmd\n" if $ENV{DEBUG};
-    my $browser = LWP::UserAgent->new();
-	my $url = sprintf 'https://%s/nuova', $self->{host};
-	my $xml_header = "<?xml version='1.0'?>";
-	my $request = HTTP::Request->new(POST => $url);
-	$request->content_type("application/x-www-form-urlencoded");
-	$request->content($cmd);
+    print " --> $cmd\n" if $ENV{DEBUG};
+    my $browser = LWP::UserAgent->new(ssl_opts => {verify_hostname => 0});
+    my $url = sprintf 'https://%s/nuova', $self->{host};
+    my $xml_header = "<?xml version='1.0'?>";
+    my $request = HTTP::Request->new(POST => $url);
+    $request->content_type("application/x-www-form-urlencoded");
+    $request->content($cmd);
 
-	my $response = $browser->request($request);
-	unless($response->is_success){
-		return $self->err("xml fetch error: %s", $response->status_line);
-	}
-print " <-- ".$response->content."\n\n" if $ENV{DEBUG};
-	my $parser = XML::Simple->new();
-   my $xml = eval {$parser->XMLin($response->content, KeyAttr => 'dn')};
+    my $response = $browser->request($request);
+    unless($response->is_success){
+        my $err = sprintf "xml fetch error: %s", $response->status_line;
+        $self->err($err);
+        my %rc = ( "errorDescr" => $err);
+	my $r_ref = \%rc;
+	return $r_ref;
+    }
+    print " <-- ".$response->content."\n\n" if $ENV{DEBUG};
+    my $parser = XML::Simple->new();
+    my $xml = eval {$parser->XMLin($response->content, KeyAttr => 'dn')};
     return $self->err("parsing xml %s\n----\n%s\n----\n", $@, 
         $response->content) if $@;
     return $xml;
