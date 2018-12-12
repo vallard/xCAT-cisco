@@ -403,7 +403,14 @@ sub inv {
 	foreach my $gn (@res){
 		my %nodes = %{$gn->{nodes}};  # hash of nodename => service profile name
 		my $blade = $gn->{ucsm}->get_dns(map {$_->{dn}} values %nodes);
-		my $blade_out = $blade->{outConfigs}->{computeBlade};
+		#print("rack mount: ", $blade->{outConfigs}->{rack_mount}, "\n");
+		#print Dumper $blade;
+		my $blade_out;
+		if (exists $blade->{outConfigs}->{computeBlade}) {
+		  $blade_out = $blade->{outConfigs}->{computeBlade};
+                }elsif(exists $blade->{outConfigs}->{computeRackUnit}) {
+		  $blade_out = $blade->{outConfigs}->{computeRackUnit};
+		}
 		# if less than one have to change the hash
 		$blade_out = {$blade_out->{dn} => $blade_out} if $blade_out->{dn};
 		$blade_out->{$_}{dn}=$_ for keys %$blade_out;
@@ -435,7 +442,12 @@ sub powerStat {
 	foreach my $gn (@res){
         my %nodes = %{$gn->{nodes}};
         my $blade = $gn->{ucsm}->get_dns(map {$_->{dn}} values %nodes);
-        my $blade_out = $blade->{outConfigs}->{computeBlade};
+	my $blade_out;
+	if (exists $blade->{outConfigs}->{computeBlade}) {
+	  $blade_out = $blade->{outConfigs}->{computeBlade};
+        }elsif(exists $blade->{outConfigs}->{computeRackUnit}) {
+	  $blade_out = $blade->{outConfigs}->{computeRackUnit};
+	}
         $blade_out = {$blade_out->{dn} => $blade_out} if $blade_out->{dn};
         $blade_out->{$_}{dn}=$_ for keys %$blade_out;
         my %cmap = map { $nodes{$_}{dn} => $_ } keys %nodes;
